@@ -1,0 +1,15 @@
+# Ignore .env files (common for storing API keys)
+*.env
+
+# Ignore node_modules folder
+node_modules/
+
+# Ignore build output folders
+dist/
+build/
+
+# Ignore log files
+*.log
+
+# Ignore sensitive files like API keys
+secret_keys.json
