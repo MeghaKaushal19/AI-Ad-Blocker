@@ -1,10 +1,21 @@
-const path = require('path');
+const CopyPlugin = require("copy-webpack-plugin");
 
 module.exports = {
-  entry: './src/content.js', // Your main content.js file
-  output: {
-    filename: 'bundle.js',
-    path: path.resolve(__dirname, 'dist'),
+  entry: {
+    content: "./src/content.js", // example
+    background: "./background.js",
+    popup: "./popup.js",
   },
-  mode: 'production',
+  output: {
+    path: path.resolve(__dirname, "dist"),
+    filename: "[name].js",
+  },
+  plugins: [
+    new CopyPlugin({
+      patterns: [
+        { from: "src/model", to: "model" },
+      ],
+    }),
+  ],
+  // other config...
 };
