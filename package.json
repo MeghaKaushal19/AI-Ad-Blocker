@@ -1,22 +1,13 @@
 {
-  "dependencies": {
-    "@tensorflow/tfjs": "^4.22.0",
-    "express": "^5.1.0",
-    "webpack": "^5.98.0",
-    "webpack-cli": "^6.0.1"
-  },
-  "name": "adblockerproj",
+  "name": "ai-ad-blocker",
   "version": "1.0.0",
-  "main": "background.js",
+  "description": "AI-powered ad blocker extension",
+  "main": "src/model/createModel.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "create-model": "node src/model/createModel.js",
+    "download-model": "node src/downloadModel.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "devDependencies": {
-    "copy-webpack-plugin": "^13.0.0"
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.17.0"
   }
 }

@@ -2,231 +2,108 @@ import * as tf from '@tensorflow/tfjs';
 
 class PersonalizedModelTrainer {
     constructor() {
-        this.baseModel = null;
-        this.personalizedModel = null;
-        this.trainingData = {
-            images: [],
-            labels: []
-        };
+        this.model = null;
         this.isInitialized = false;
         this.metrics = {
             totalPredictions: 0,
             correctPredictions: 0,
             falsePositives: 0,
             falseNegatives: 0,
-            avgInferenceTime: 0,
-            trainingSessions: 0,
-            avgTrainingTime: 0
+            avgInferenceTime: 0
         };
     }
 
     async initialize() {
         try {
-            // Load the base model
-            const modelURL = chrome.runtime.getURL('model/model.json');
-            this.baseModel = await tf.loadGraphModel(modelURL);
+            console.log("🔄 Initializing model...");
             
-            // Create personalized model structure
-            this.personalizedModel = tf.sequential({
-                layers: [
-                    // Use base model as feature extractor (freeze weights)
-                    ...this.baseModel.layers.slice(0, -1).map(layer => {
-                        layer.trainable = false;
-                        return layer;
-                    }),
-                    // Add personalization layers
-                    tf.layers.dense({units: 64, activation: 'relu'}),
-                    tf.layers.dropout({rate: 0.5}),
-                    tf.layers.dense({units: 1, activation: 'sigmoid'})
-                ]
-            });
+            // Get the model URL using chrome.runtime.getURL
+            const modelPath = chrome.runtime.getURL('model/model.json');
+            console.log("📂 Loading model from:", modelPath);
 
-            // Compile the model
-            this.personalizedModel.compile({
-                optimizer: tf.train.adam(0.0001),
-                loss: 'binaryCrossentropy',
-                metrics: ['accuracy']
-            });
+            // Load the model
+            this.model = await tf.loadGraphModel(modelPath);
+            console.log("✅ Model loaded successfully");
 
             this.isInitialized = true;
-            console.log("✅ Personalized Model Trainer Initialized");
             return true;
         } catch (error) {
-            console.error("❌ Error initializing personalized model:", error);
+            console.error("❌ Error initializing model:", error);
+            // Log more details about the error
+            if (error.message.includes('Failed to fetch')) {
+                console.error("💡 This might be due to CORS or file access issues.");
+                console.error("🔍 Make sure the model files are in the correct location:");
+                console.error("   - dist/model/model.json");
+                console.error("   - dist/model/group1-shard1of1.bin");
+            }
             return false;
         }
     }
 
-    async addTrainingExample(imageElement, label) {
+    async predict(imageElement) {
+        if (!this.isInitialized || !this.model) {
+            console.error("❌ Model not initialized");
+            return null;
+        }
+
         try {
-            // Convert image to tensor
+            const startTime = performance.now();
+            
+            // Preprocess the image
             const tensor = await this.preprocessImage(imageElement);
-            if (tensor) {
-                this.trainingData.images.push(tensor);
-                this.trainingData.labels.push(label);
-                return true;
+            if (!tensor) {
+                throw new Error("Failed to preprocess image");
             }
-            return false;
+
+            // Make prediction
+            const predictions = await this.model.predict(tensor).data();
+            const inferenceTime = performance.now() - startTime;
+            
+            // Update metrics
+            this.metrics.totalPredictions++;
+            this.metrics.avgInferenceTime = 
+                (this.metrics.avgInferenceTime * (this.metrics.totalPredictions - 1) + inferenceTime) 
+                / this.metrics.totalPredictions;
+
+            // Cleanup
+            tf.dispose(tensor);
+            
+            // Return the prediction (1 for ad, 0 for not ad)
+            return predictions[0];
         } catch (error) {
-            console.error("Error adding training example:", error);
-            return false;
+            console.error("❌ Error making prediction:", error);
+            return null;
         }
     }
 
     async preprocessImage(element) {
         try {
             return tf.tidy(() => {
-                const tensor = tf.browser.fromPixels(element)
-                    .resizeNearestNeighbor([224, 224])
-                    .toFloat()
-                    .expandDims();
-                return tensor.div(255.0);
-            });
-        } catch (error) {
-            console.error("Error preprocessing image:", error);
-            return null;
-        }
-    }
-
-    async trainOnUserData() {
-        if (this.trainingData.images.length < 5) {
-            console.log("Not enough training data yet");
-            return false;
-        }
-
-        try {
-            const startTime = performance.now();
-            
-            // Convert training data to tensors
-            const xs = tf.concat(this.trainingData.images);
-            const ys = tf.tensor2d(this.trainingData.labels, [this.trainingData.labels.length, 1]);
-
-            // Train the model
-            const history = await this.personalizedModel.fit(xs, ys, {
-                epochs: 10,
-                batchSize: 32,
-                validationSplit: 0.2,
-                callbacks: {
-                    onEpochEnd: (epoch, logs) => {
-                        console.log(`Epoch ${epoch + 1}: loss = ${logs.loss.toFixed(4)}, accuracy = ${logs.acc.toFixed(4)}`);
-                    }
-                }
-            });
-
-            const trainingTime = performance.now() - startTime;
-            
-            // Update metrics
-            this.metrics.trainingSessions++;
-            this.metrics.avgTrainingTime = 
-                (this.metrics.avgTrainingTime * (this.metrics.trainingSessions - 1) + trainingTime) 
-                / this.metrics.trainingSessions;
-
-            // Save the updated model
-            await this.saveModel();
-            
-            // Save metrics
-            await this.saveMetrics();
-            
-            return true;
-        } catch (error) {
-            console.error("Error training model:", error);
-            return false;
-        }
-    }
-
-    async predict(imageElement) {
-        try {
-            const startTime = performance.now();
-            const tensor = await this.preprocessImage(imageElement);
-            if (tensor) {
-                const prediction = await this.personalizedModel.predict(tensor).data();
-                const inferenceTime = performance.now() - startTime;
+                // Convert the image element to a tensor
+                let tensor = tf.browser.fromPixels(element);
                 
-                // Update metrics
-                this.metrics.totalPredictions++;
-                this.metrics.avgInferenceTime = 
-                    (this.metrics.avgInferenceTime * (this.metrics.totalPredictions - 1) + inferenceTime) 
-                    / this.metrics.totalPredictions;
-
-                return prediction[0];
-            }
+                // Resize to 224x224 (MobileNetV2 input size)
+                tensor = tf.image.resizeBilinear(tensor, [224, 224]);
+                
+                // Normalize values to [-1, 1]
+                tensor = tensor.toFloat().div(127.5).sub(1);
+                
+                // Add batch dimension
+                tensor = tensor.expandDims(0);
+                
+                return tensor;
+            });
+        } catch (error) {
+            console.error("❌ Error preprocessing image:", error);
             return null;
-        } catch (error) {
-            console.error("Error making prediction:", error);
-            return null;
         }
-    }
-
-    async saveModel() {
-        try {
-            await this.personalizedModel.save('indexeddb://personalized-ad-model');
-            console.log("✅ Personalized model saved");
-            return true;
-        } catch (error) {
-            console.error("❌ Error saving personalized model:", error);
-            return false;
-        }
-    }
-
-    async loadSavedModel() {
-        try {
-            this.personalizedModel = await tf.loadLayersModel('indexeddb://personalized-ad-model');
-            console.log("✅ Loaded saved personalized model");
-            return true;
-        } catch (error) {
-            console.log("No saved personalized model found, using base model");
-            return false;
-        }
-    }
-
-    async updateMetricsWithFeedback(prediction, actualLabel) {
-        if (prediction > 0.7 && actualLabel === 1) this.metrics.correctPredictions++;
-        else if (prediction > 0.7 && actualLabel === 0) this.metrics.falsePositives++;
-        else if (prediction <= 0.7 && actualLabel === 1) this.metrics.falseNegatives++;
-        await this.saveMetrics();
     }
 
     getPerformanceMetrics() {
-        const accuracy = this.metrics.totalPredictions > 0 
-            ? this.metrics.correctPredictions / this.metrics.totalPredictions 
-            : 0;
-        
-        const precision = (this.metrics.correctPredictions + this.metrics.falsePositives) > 0
-            ? this.metrics.correctPredictions / (this.metrics.correctPredictions + this.metrics.falsePositives)
-            : 0;
-        
-        const recall = (this.metrics.correctPredictions + this.metrics.falseNegatives) > 0
-            ? this.metrics.correctPredictions / (this.metrics.correctPredictions + this.metrics.falseNegatives)
-            : 0;
-
         return {
-            accuracy,
-            precision,
-            recall,
-            f1Score: precision && recall ? 2 * (precision * recall) / (precision + recall) : 0,
-            avgInferenceTime: this.metrics.avgInferenceTime,
-            avgTrainingTime: this.metrics.avgTrainingTime,
             totalPredictions: this.metrics.totalPredictions,
-            trainingSessions: this.metrics.trainingSessions
+            avgInferenceTime: this.metrics.avgInferenceTime,
+            accuracy: this.metrics.correctPredictions / this.metrics.totalPredictions || 0
         };
-    }
-
-    async saveMetrics() {
-        try {
-            await chrome.storage.local.set({ 'modelMetrics': this.metrics });
-        } catch (error) {
-            console.error("Error saving metrics:", error);
-        }
-    }
-
-    async loadMetrics() {
-        try {
-            const result = await chrome.storage.local.get('modelMetrics');
-            if (result.modelMetrics) {
-                this.metrics = result.modelMetrics;
-            }
-        } catch (error) {
-            console.error("Error loading metrics:", error);
-        }
     }
 } 
