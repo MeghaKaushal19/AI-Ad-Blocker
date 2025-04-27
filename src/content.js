@@ -311,6 +311,11 @@ class AdShield {
             } else if (message.type === 'WHITELIST_UPDATED') {
                 this.whitelist = message.whitelist;
                 this.processPage();
+            } else if (message.type === 'BLOCK_ALL_ADS') {
+                console.log('Block All Ads command received');
+                this.blockAllAds();
+                sendResponse({ success: true });
+                return true;
             }
         });
     }
@@ -568,6 +573,104 @@ class AdShield {
             childList: true,
             subtree: true
         });
+    }
+
+    blockAllAds() {
+        console.log('Blocking all ads on page');
+        
+        // Select all potential ad elements
+        const adSelectors = [
+            // Common ad selectors
+            '[class*="ad-"]',
+            '[class*="advertisement"]',
+            '[id*="ad-"]',
+            'ins.adsbygoogle',
+            'iframe[src*="ad"]',
+            '[class*="sponsored"]',
+            '[class*="promoted"]',
+            '[data-ad]',
+            '[data-advertisement]',
+            '[data-sponsored]',
+            '[data-promoted]',
+            '[data-advertiser]',
+            '[data-advertiser-id]',
+            '[data-ad-id]',
+            '[data-ad-unit]',
+            '[data-ad-slot]',
+            '[data-ad-client]',
+            '[data-ad-format]',
+            '[data-ad-layout]',
+            '[data-ad-region]',
+            '[data-ad-status]',
+            '[data-ad-type]',
+            '[data-ad-zone]',
+            '[data-ad-network]',
+            '[data-ad-platform]',
+            '[data-ad-provider]',
+            '[data-ad-publisher]',
+            '[data-ad-campaign]',
+            '[data-ad-creative]',
+            '[data-ad-placement]',
+            '[data-ad-position]',
+            '[data-ad-size]',
+            '[data-ad-target]',
+            // Category-specific selectors
+            ...Object.values(this.adCategories).flatMap(category => category.selectors)
+        ];
+        
+        // Combine all selectors
+        const combinedSelector = adSelectors.join(', ');
+        
+        // Find all matching elements
+        const adElements = document.querySelectorAll(combinedSelector);
+        console.log(`Found ${adElements.length} potential ad elements`);
+        
+        // Remove each element
+        adElements.forEach(element => {
+            if (element && element.parentNode) {
+                element.parentNode.removeChild(element);
+            }
+        });
+        
+        // Also check for dynamically loaded ads
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) { // Element node
+                            // Check if the node matches any ad selector
+                            const isAd = adSelectors.some(selector => {
+                                try {
+                                    return node.matches(selector);
+                                } catch {
+                                    return false;
+                                }
+                            });
+                            
+                            if (isAd && node.parentNode) {
+                                node.parentNode.removeChild(node);
+                            }
+                            
+                            // Also check children of the node
+                            const childAds = node.querySelectorAll(combinedSelector);
+                            childAds.forEach(adElement => {
+                                if (adElement && adElement.parentNode) {
+                                    adElement.parentNode.removeChild(adElement);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        });
+        
+        // Start observing the document
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        console.log('All ads blocked and observer set up for dynamic content');
     }
 }
 
